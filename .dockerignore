@@ -1,0 +1,15 @@
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+db/gametrip.db
+db/gametrip.db-shm
+db/gametrip.db-wal
+db/*.xlsx
+db/*.csv
+frontend/node_modules
+frontend/dist
+frontend/.env.local
+frontend/.env
+osrm/
+*.md

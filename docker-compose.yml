@@ -1,0 +1,38 @@
+services:
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount db/ directory so the SQLite file (+ WAL files) persists on the host
+      - ./db:/data:rw
+    environment:
+      GAMETRIP_DB: /data/gametrip.db
+      # Allow requests from the frontend origin (port 80)
+      ALLOWED_ORIGINS: "http://localhost:3000"
+      RATE_LIMIT: "60"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+      args:
+        # VITE_ vars are baked in at build time — set in .env or export before running
+        VITE_MAPBOX_TOKEN: ${VITE_MAPBOX_TOKEN}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

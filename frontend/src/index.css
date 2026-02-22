@@ -1,0 +1,65 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,500;0,9..40,700;0,9..40,800;1,9..40,400&family=Instrument+Serif&display=swap');
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: #0B0E14;
+  color: #E2E8F0;
+  overflow: hidden;
+}
+
+button {
+  font-family: 'DM Sans', sans-serif;
+  cursor: pointer;
+}
+
+/* ── Mapbox popup dark overrides ─────────────────────────────────────────── */
+.mapboxgl-popup-content {
+  background: #161D2B !important;
+  border: 1px solid #1C2333 !important;
+  border-radius: 10px !important;
+  padding: 12px !important;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6) !important;
+}
+.mapboxgl-popup-tip {
+  border-top-color: #161D2B !important;
+  border-bottom-color: #161D2B !important;
+}
+.mapboxgl-popup-close-button {
+  color: #64748B !important;
+  font-size: 18px !important;
+  padding: 4px 8px !important;
+  background: transparent !important;
+}
+.mapboxgl-popup-close-button:hover {
+  background: #1C2333 !important;
+  border-radius: 4px !important;
+}
+
+/* ── Mapbox nav controls ─────────────────────────────────────────────────── */
+.mapboxgl-ctrl-group {
+  background: #161D2B !important;
+  border: 1px solid #1C2333 !important;
+  border-radius: 8px !important;
+}
+.mapboxgl-ctrl-group button {
+  width: 32px !important;
+  height: 32px !important;
+}
+.mapboxgl-ctrl-group button span {
+  filter: invert(0.6) !important;
+}
+.mapboxgl-ctrl-group button + button {
+  border-top: 1px solid #1C2333 !important;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1C2333; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #2A3548; }
