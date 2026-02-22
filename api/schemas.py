@@ -90,6 +90,16 @@ class CustomTripOut(BaseModel):
     breakdown: ScoreBreakdown
 
 
+class ReachableEventOut(BaseModel):
+    """An event reachable from a prior event, with drive/buffer details."""
+    event: EventOut
+    drive_sec: int
+    buffer_sec: int
+    drive_hours: float
+    buffer_hours: float
+    distance_km: float | None = None
+
+
 # ─── Misc ────────────────────────────────────────────────────────────────────
 
 class ComputeStatus(BaseModel):

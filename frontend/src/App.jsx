@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
-import { fetchVenues, fetchEvents, fetchTrips } from "./api";
+import { fetchVenues, fetchEvents, fetchTrips, fetchReachableFromEvent, buildCustomTrip } from "./api";
 import MapView from "./components/Map";
 import TripCard from "./components/TripCard";
+import RoadTripBuilder from "./components/RoadTripBuilder";
 import { COLORS } from "./constants";
 
 function LayerToggle({ label, color, checked, onChange }) {
@@ -98,6 +99,15 @@ export default function App() {
   const [venueMap, setVenueMap] = useState(new Map());
   const [loading, setLoading] = useState(true);
 
+  // ── road trip builder state ─────────────────────────────────────────────────
+  const [roadTripStops, setRoadTripStops] = useState([]);   // EventOut[]
+  const [roadTripLegs, setRoadTripLegs] = useState([]);     // {drive_hours, buffer_hours}[] per leg
+  const [reachable, setReachable] = useState(null);         // null = loading, [] = empty
+  const [builtTrip, setBuiltTrip] = useState(null);
+  const [building, setBuilding] = useState(false);
+
+  const inRoadTripMode = roadTripStops.length > 0;
+
   function toggleLayer(key) {
     setLayerVisibility((prev) => ({ ...prev, [key]: !prev[key] }));
   }
@@ -118,6 +128,50 @@ export default function App() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  // ── road trip handlers ──────────────────────────────────────────────────────
+
+  function loadReachable(eventId) {
+    setReachable(null);
+    fetchReachableFromEvent(eventId)
+      .then(setReachable)
+      .catch(() => setReachable([]));
+  }
+
+  function handleStartRoadTrip(eventId) {
+    const event = eventMap.get(String(eventId));
+    if (!event) return;
+    setRoadTripStops([event]);
+    setRoadTripLegs([]);
+    setBuiltTrip(null);
+    loadReachable(eventId);
+  }
+
+  function handleAddStop(reachableItem) {
+    setRoadTripStops((prev) => [...prev, reachableItem.event]);
+    setRoadTripLegs((prev) => [...prev, {
+      drive_hours: reachableItem.drive_hours,
+      buffer_hours: reachableItem.buffer_hours,
+    }]);
+    setBuiltTrip(null);
+    loadReachable(reachableItem.event.id);
+  }
+
+  function handleClear() {
+    setRoadTripStops([]);
+    setRoadTripLegs([]);
+    setReachable(null);
+    setBuiltTrip(null);
+  }
+
+  function handleBuild() {
+    const ids = roadTripStops.map((e) => e.id);
+    setBuilding(true);
+    buildCustomTrip(ids)
+      .then((results) => setBuiltTrip(Array.isArray(results) ? (results[0] ?? null) : results))
+      .catch(() => {})
+      .finally(() => setBuilding(false));
+  }
 
   return (
     <div style={{ display: "flex", width: "100%", height: "100vh" }}>
@@ -162,42 +216,62 @@ export default function App() {
           />
 
           <div style={{ height: "1px", background: COLORS.panelBorder, margin: "12px 0 14px" }} />
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <span style={{ fontSize: "10px", color: COLORS.textDim, fontWeight: 600, letterSpacing: "1px" }}>
-              SAMPLE ROAD TRIPS
-            </span>
-            <span style={{ fontSize: "11px", color: COLORS.textMuted }}>Week 1 · 2025</span>
-          </div>
-        </div>
-
-        {/* Trip list */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 20px", display: "flex", flexDirection: "column", gap: "8px" }}>
-          {loading ? (
-            <div style={{ textAlign: "center", padding: "32px 0", color: COLORS.textDim, fontSize: "12px" }}>
-              Loading…
+          {!inRoadTripMode && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+              <span style={{ fontSize: "10px", color: COLORS.textDim, fontWeight: 600, letterSpacing: "1px" }}>
+                SAMPLE ROAD TRIPS
+              </span>
+              <span style={{ fontSize: "11px", color: COLORS.textMuted }}>Week 1 · 2025</span>
             </div>
-          ) : trips.length === 0 ? (
-            <div style={{ fontSize: "13px", color: COLORS.textMuted, textAlign: "center", padding: "20px" }}>
-              No trips found. Run compute first.
-            </div>
-          ) : (
-            trips.map((trip) => (
-              <TripCard
-                key={trip.id}
-                trip={trip}
-                eventMap={eventMap}
-                venueMap={venueMap}
-                isSelected={false}
-                onSelect={() => {}}
-              />
-            ))
           )}
         </div>
+
+        {/* ── Sidebar body: trips list OR road trip builder ── */}
+        {inRoadTripMode ? (
+          <RoadTripBuilder
+            stops={roadTripStops}
+            legs={roadTripLegs}
+            reachable={reachable}
+            onAddStop={handleAddStop}
+            onClear={handleClear}
+            onBuild={handleBuild}
+            builtTrip={builtTrip}
+            building={building}
+          />
+        ) : (
+          <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 20px", display: "flex", flexDirection: "column", gap: "8px" }}>
+            {loading ? (
+              <div style={{ textAlign: "center", padding: "32px 0", color: COLORS.textDim, fontSize: "12px" }}>
+                Loading…
+              </div>
+            ) : trips.length === 0 ? (
+              <div style={{ fontSize: "13px", color: COLORS.textMuted, textAlign: "center", padding: "20px" }}>
+                No trips found. Run compute first.
+              </div>
+            ) : (
+              trips.map((trip) => (
+                <TripCard
+                  key={trip.id}
+                  trip={trip}
+                  eventMap={eventMap}
+                  venueMap={venueMap}
+                  isSelected={false}
+                  onSelect={() => {}}
+                />
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Map ── */}
       <div style={{ flex: 1, height: "100%" }}>
-        <MapView venueGeoJSON={venueGeoJSON} eventsGeoJSON={eventsGeoJSON} layerVisibility={layerVisibility} />
+        <MapView
+          venueGeoJSON={venueGeoJSON}
+          eventsGeoJSON={eventsGeoJSON}
+          layerVisibility={layerVisibility}
+          onStartRoadTrip={handleStartRoadTrip}
+        />
       </div>
     </div>
   );

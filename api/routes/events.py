@@ -13,14 +13,14 @@ All queries here target events_1 until that table is reconciled.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.deps import get_db_path
-from api.schemas import EventDetail, EventOut, VenueOut
+from api.schemas import EventDetail, EventOut, ReachableEventOut, VenueOut
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -174,3 +174,139 @@ def get_event(
         detail.venue = _row_to_venue(venue_row)
 
     return detail
+
+
+@router.get("/{event_id}/reachable", response_model=list[ReachableEventOut])
+def reachable_from_event(
+    event_id: str,
+    db_path: Annotated[Path, Depends(get_db_path)],
+    max_drive_hours: float = Query(
+        12.0, ge=0.5, le=24.0,
+        description="Maximum drive time in hours",
+    ),
+):
+    """
+    Return all events reachable from the given event, with drive time and buffer.
+
+    First tries pre-computed trip_edges; falls back to venue_distances if no
+    edges have been stored yet.  Events are sorted by drive time ascending.
+    """
+    conn = _get_conn(db_path)
+    try:
+        # 1. Fetch the source event
+        row = conn.execute(
+            "SELECT * FROM events_1 WHERE id = ?", (event_id,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Event '{event_id}' not found")
+
+        event = _row_to_event(row)
+        start_dt = _parse_utc(dict(row)["startDate"])
+        end_dt = start_dt + timedelta(hours=DEFAULT_DURATION)
+        max_drive_sec = int(max_drive_hours * 3600)
+        # Format matching events_1 startDate strings (e.g. "2025-08-30T14:00:00.000Z")
+        end_iso = end_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+        # 2. Try trip_edges (pre-computed graph)
+        edge_rows = conn.execute(
+            """
+            SELECT te.to_event, te.drive_sec, te.buffer_sec, e.*
+            FROM trip_edges te
+            JOIN events_1 e ON te.to_event = e.id
+            WHERE te.from_event = ?
+              AND te.drive_sec <= ?
+            ORDER BY te.drive_sec
+            """,
+            (event_id, max_drive_sec),
+        ).fetchall()
+
+        if edge_rows:
+            return [
+                ReachableEventOut(
+                    event=_row_to_event(r),
+                    drive_sec=r["drive_sec"],
+                    buffer_sec=r["buffer_sec"],
+                    drive_hours=round(r["drive_sec"] / 3600, 2),
+                    buffer_hours=round(r["buffer_sec"] / 3600, 2),
+                )
+                for r in edge_rows
+            ]
+
+        # 3. Fallback: compute from venue_distances + events_1
+        reachable: list[ReachableEventOut] = []
+
+        # Same-venue events (drive_sec = 0)
+        same_rows = conn.execute(
+            """
+            SELECT *
+            FROM events_1
+            WHERE venueId = ?
+              AND startDate > ?
+              AND season = ?
+              AND week = ?
+              AND startTimeTBD = 'FALSE'
+              AND id != ?
+            ORDER BY startDate
+            """,
+            (event.venue_id, end_iso, event.season, event.week, event_id),
+        ).fetchall()
+
+        for r in same_rows:
+            b_start = _parse_utc(dict(r)["startDate"])
+            buf = int((b_start - end_dt).total_seconds())
+            if buf >= 0:
+                reachable.append(ReachableEventOut(
+                    event=_row_to_event(r),
+                    drive_sec=0,
+                    buffer_sec=buf,
+                    drive_hours=0.0,
+                    buffer_hours=round(buf / 3600, 2),
+                    distance_km=0.0,
+                ))
+
+        # Different-venue events via venue_distances
+        try:
+            venue_id_int = int(event.venue_id)
+        except (ValueError, TypeError):
+            venue_id_int = None
+
+        if venue_id_int is not None:
+            diff_rows = conn.execute(
+                """
+                SELECT e.*, vd.duration_sec, vd.distance_m
+                FROM events_1 e
+                JOIN venue_distances vd
+                  ON CAST(e.venueId AS INTEGER) = vd.venue_b_id
+                WHERE vd.venue_a_id = ?
+                  AND vd.venue_b_id != ?
+                  AND vd.duration_sec <= ?
+                  AND e.startDate > ?
+                  AND e.season = ?
+                  AND e.week = ?
+                  AND e.startTimeTBD = 'FALSE'
+                ORDER BY vd.duration_sec
+                """,
+                (venue_id_int, venue_id_int, max_drive_sec, end_iso, event.season, event.week),
+            ).fetchall()
+
+            for r in diff_rows:
+                r_dict = dict(r)
+                b_start = _parse_utc(r_dict["startDate"])
+                drive_sec = r_dict["duration_sec"]
+                buf = int((b_start - end_dt).total_seconds()) - drive_sec
+                if buf < 0:
+                    continue
+                dist = r_dict.get("distance_m")
+                reachable.append(ReachableEventOut(
+                    event=_row_to_event(r),
+                    drive_sec=drive_sec,
+                    buffer_sec=buf,
+                    drive_hours=round(drive_sec / 3600, 2),
+                    buffer_hours=round(buf / 3600, 2),
+                    distance_km=round(dist / 1000, 1) if dist else None,
+                ))
+
+        reachable.sort(key=lambda x: x.drive_sec)
+        return reachable
+    finally:
+        conn.close()

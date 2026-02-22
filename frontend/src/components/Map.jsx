@@ -3,6 +3,14 @@ import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { COLORS, TIME_SLOT_COLORS } from "../constants";
 
+// Injected into popup HTML to avoid inline style CSP issues
+const BTN_STYLE = [
+  "margin-top:10px", "width:100%", "padding:7px 0", "border:none",
+  "border-radius:6px", "background:#F59E0B", "color:#000",
+  "font-weight:700", "font-size:12px", "cursor:pointer",
+  "font-family:'DM Sans',sans-serif", "letter-spacing:0.3px",
+].join(";");
+
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 
 const EMPTY_FC = { type: "FeatureCollection", features: [] };
@@ -18,15 +26,25 @@ const TIME_SLOT_COLOR_EXPR = [
 
 const DEFAULT_VISIBILITY = { venues: true, events: true };
 
-export default function Map({ venueGeoJSON = EMPTY_FC, eventsGeoJSON = EMPTY_FC, layerVisibility = DEFAULT_VISIBILITY }) {
-  const containerRef      = useRef(null);
-  const mapRef            = useRef(null);
-  const loadedRef         = useRef(false);
-  const pendingRef        = useRef(null);   // venue data before map loaded
-  const pendingEventsRef  = useRef(null);   // event data before map loaded
-  const popupRef          = useRef(null);
-  const hoveredRef        = useRef(null);   // currently hovered venue id
-  const hoveredEventRef   = useRef(null);   // currently hovered event id
+export default function Map({
+  venueGeoJSON = EMPTY_FC,
+  eventsGeoJSON = EMPTY_FC,
+  layerVisibility = DEFAULT_VISIBILITY,
+  onStartRoadTrip = null,
+}) {
+  const containerRef        = useRef(null);
+  const mapRef              = useRef(null);
+  const loadedRef           = useRef(false);
+  const pendingRef          = useRef(null);   // venue data before map loaded
+  const pendingEventsRef    = useRef(null);   // event data before map loaded
+  const popupRef            = useRef(null);
+  const hoveredRef          = useRef(null);   // currently hovered venue id
+  const hoveredEventRef     = useRef(null);   // currently hovered event id
+  const onStartRoadTripRef  = useRef(onStartRoadTrip);
+
+  useEffect(() => {
+    onStartRoadTripRef.current = onStartRoadTrip;
+  }, [onStartRoadTrip]);
 
   // ── init map ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -252,7 +270,7 @@ export default function Map({ venueGeoJSON = EMPTY_FC, eventsGeoJSON = EMPTY_FC,
           noon: "#34D399", afternoon: "#F59E0B", evening: "#A78BFA",
         };
         const dotColor = slotColors[props.time_slot] ?? "#94A3B8";
-        popupRef.current = new mapboxgl.Popup({ offset: 12, closeButton: true, maxWidth: "240px" })
+        const popup = new mapboxgl.Popup({ offset: 12, closeButton: true, maxWidth: "240px" })
           .setLngLat(e.lngLat)
           .setHTML(`
             <div style="font-family:'DM Sans',sans-serif;">
@@ -267,9 +285,23 @@ export default function Map({ venueGeoJSON = EMPTY_FC, eventsGeoJSON = EMPTY_FC,
                 <span style="width:7px;height:7px;border-radius:50%;background:${dotColor};display:inline-block;"></span>
                 <span style="font-size:10px;color:#94A3B8;text-transform:capitalize;">${props.time_slot ?? ""}</span>
               </div>
+              <button data-action="start-road-trip" data-event-id="${props.id}" style="${BTN_STYLE}">
+                Start Road Trip Here
+              </button>
             </div>
           `)
           .addTo(map);
+
+        popupRef.current = popup;
+
+        // Attach click handler to the button via DOM (popup HTML can't use React handlers)
+        const btn = popup.getElement()?.querySelector('[data-action="start-road-trip"]');
+        if (btn) {
+          btn.addEventListener("click", () => {
+            popup.remove();
+            onStartRoadTripRef.current?.(props.id);
+          });
+        }
       });
 
       loadedRef.current = true;

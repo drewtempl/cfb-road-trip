@@ -43,3 +43,13 @@ export function fetchTrips({ season = 2025, week = 1, limit = 50, auto_compute =
 export function computeTrips({ season = 2025, week = 1, top_n = 100 } = {}) {
   return post("/api/v1/trips/compute", { season, week, top_n });
 }
+
+/** Fetch events reachable from a given event, sorted by drive time. */
+export function fetchReachableFromEvent(eventId, { max_drive_hours = 12 } = {}) {
+  return get(`/api/v1/events/${eventId}/reachable`, { max_drive_hours });
+}
+
+/** Build a custom trip from a user-selected list of event IDs. */
+export function buildCustomTrip(eventIds) {
+  return post("/api/v1/trips/custom", {}, eventIds);
+}
