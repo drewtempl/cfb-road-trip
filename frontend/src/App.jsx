@@ -4,6 +4,37 @@ import MapView from "./components/Map";
 import TripCard from "./components/TripCard";
 import { COLORS } from "./constants";
 
+function LayerToggle({ label, color, checked, onChange }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: "50%",
+          background: color, display: "inline-block",
+          opacity: checked ? 1 : 0.3, flexShrink: 0,
+        }} />
+        <span style={{ fontSize: "12px", color: checked ? COLORS.text : COLORS.textDim }}>
+          {label}
+        </span>
+      </div>
+      <button
+        onClick={onChange}
+        style={{
+          width: 32, height: 18, borderRadius: 9, flexShrink: 0,
+          background: checked ? COLORS.accent : COLORS.panelBorder,
+          border: "none", cursor: "pointer", position: "relative", padding: 0,
+        }}
+      >
+        <span style={{
+          position: "absolute", top: 2,
+          left: checked ? 16 : 2,
+          width: 14, height: 14, borderRadius: "50%", background: "#FFF",
+        }} />
+      </button>
+    </div>
+  );
+}
+
 const EMPTY_FC = { type: "FeatureCollection", features: [] };
 
 function venuesToGeoJSON(venues) {
@@ -26,12 +57,50 @@ function venuesToGeoJSON(venues) {
   };
 }
 
+function getTimeSlot(startDate) {
+  const hour = new Date(startDate).getUTCHours();
+  if (hour <= 17) return "noon";
+  if (hour <= 22) return "afternoon";
+  return "evening";
+}
+
+function eventsToGeoJSON(events, venueMap) {
+  const features = [];
+  events.forEach((ev) => {
+    // API returns venue_id as string; venueMap keys are also strings (VenueOut.id: str)
+    const venue = venueMap.get(ev.venue_id);
+    if (!venue || venue.lat == null || venue.lng == null) return;
+    features.push({
+      type: "Feature",
+      id: ev.id,
+      geometry: { type: "Point", coordinates: [venue.lng, venue.lat] },
+      properties: {
+        id: ev.id,
+        homeTeam: ev.home,
+        awayTeam: ev.away,
+        venueName: ev.venue_name ?? venue.name,
+        city: venue.city,
+        state: venue.state,
+        startDate: ev.kickoff,
+        time_slot: ev.time_slot ?? getTimeSlot(ev.kickoff),
+      },
+    });
+  });
+  return { type: "FeatureCollection", features };
+}
+
 export default function App() {
   const [venueGeoJSON, setVenueGeoJSON] = useState(EMPTY_FC);
+  const [eventsGeoJSON, setEventsGeoJSON] = useState(EMPTY_FC);
+  const [layerVisibility, setLayerVisibility] = useState({ venues: true, events: true });
   const [trips, setTrips] = useState([]);
   const [eventMap, setEventMap] = useState(new Map());
   const [venueMap, setVenueMap] = useState(new Map());
   const [loading, setLoading] = useState(true);
+
+  function toggleLayer(key) {
+    setLayerVisibility((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
 
   useEffect(() => {
     Promise.all([
@@ -40,9 +109,11 @@ export default function App() {
       fetchTrips({ season: 2025, week: 1, limit: 5 }),
     ])
       .then(([venues, events, tripList]) => {
+        const vMap = new Map(venues.map((v) => [v.id, v]));
         setVenueGeoJSON(venuesToGeoJSON(venues));
+        setEventsGeoJSON(eventsToGeoJSON(events, vMap));
         setEventMap(new Map(events.map((e) => [e.id, e])));
-        setVenueMap(new Map(venues.map((v) => [v.id, v])));
+        setVenueMap(vMap);
         setTrips(tripList.slice(0, 5));
       })
       .finally(() => setLoading(false));
@@ -70,6 +141,27 @@ export default function App() {
             College Football Road Trip Planner
           </div>
           <div style={{ height: "1px", background: COLORS.panelBorder, marginBottom: "14px" }} />
+
+          {/* Layer toggles */}
+          <div style={{ marginBottom: "6px" }}>
+            <span style={{ fontSize: "10px", color: COLORS.textDim, fontWeight: 600, letterSpacing: "1px" }}>
+              LAYERS
+            </span>
+          </div>
+          <LayerToggle
+            label="Venues"
+            color={COLORS.accent}
+            checked={layerVisibility.venues}
+            onChange={() => toggleLayer("venues")}
+          />
+          <LayerToggle
+            label="Events"
+            color="#A78BFA"
+            checked={layerVisibility.events}
+            onChange={() => toggleLayer("events")}
+          />
+
+          <div style={{ height: "1px", background: COLORS.panelBorder, margin: "12px 0 14px" }} />
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
             <span style={{ fontSize: "10px", color: COLORS.textDim, fontWeight: 600, letterSpacing: "1px" }}>
               SAMPLE ROAD TRIPS
@@ -105,7 +197,7 @@ export default function App() {
 
       {/* ── Map ── */}
       <div style={{ flex: 1, height: "100%" }}>
-        <MapView venueGeoJSON={venueGeoJSON} />
+        <MapView venueGeoJSON={venueGeoJSON} eventsGeoJSON={eventsGeoJSON} layerVisibility={layerVisibility} />
       </div>
     </div>
   );

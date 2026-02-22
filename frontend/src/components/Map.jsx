@@ -1,19 +1,32 @@
 import { useEffect, useRef } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { COLORS } from "../constants";
+import { COLORS, TIME_SLOT_COLORS } from "../constants";
 
 mapboxgl.accessToken = import.meta.env.VITE_MAPBOX_TOKEN;
 
 const EMPTY_FC = { type: "FeatureCollection", features: [] };
 
-export default function Map({ venueGeoJSON = EMPTY_FC }) {
-  const containerRef = useRef(null);
-  const mapRef      = useRef(null);
-  const loadedRef   = useRef(false);
-  const pendingRef  = useRef(null);   // data that arrived before map loaded
-  const popupRef    = useRef(null);
-  const hoveredRef  = useRef(null);   // currently hovered feature id
+// Mapbox expression: pick dot color from time_slot property
+const TIME_SLOT_COLOR_EXPR = [
+  "match", ["get", "time_slot"],
+  "noon",      TIME_SLOT_COLORS.noon.dot,
+  "afternoon", TIME_SLOT_COLORS.afternoon.dot,
+  "evening",   TIME_SLOT_COLORS.evening.dot,
+  "#94A3B8",
+];
+
+const DEFAULT_VISIBILITY = { venues: true, events: true };
+
+export default function Map({ venueGeoJSON = EMPTY_FC, eventsGeoJSON = EMPTY_FC, layerVisibility = DEFAULT_VISIBILITY }) {
+  const containerRef      = useRef(null);
+  const mapRef            = useRef(null);
+  const loadedRef         = useRef(false);
+  const pendingRef        = useRef(null);   // venue data before map loaded
+  const pendingEventsRef  = useRef(null);   // event data before map loaded
+  const popupRef          = useRef(null);
+  const hoveredRef        = useRef(null);   // currently hovered venue id
+  const hoveredEventRef   = useRef(null);   // currently hovered event id
 
   // ── init map ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -153,12 +166,122 @@ export default function Map({ venueGeoJSON = EMPTY_FC }) {
           .addTo(map);
       });
 
+      // ── events source ────────────────────────────────────────────────────────
+      map.addSource("events", {
+        type: "geojson",
+        data: EMPTY_FC,
+        promoteId: "id",
+      });
+
+      // ── events glow ──────────────────────────────────────────────────────────
+      map.addLayer({
+        id: "events-glow",
+        type: "circle",
+        source: "events",
+        paint: {
+          "circle-color": TIME_SLOT_COLOR_EXPR,
+          "circle-radius": 16,
+          "circle-blur": 1.0,
+          "circle-opacity": 0.22,
+        },
+      });
+
+      // ── events dot ───────────────────────────────────────────────────────────
+      map.addLayer({
+        id: "events-circle",
+        type: "circle",
+        source: "events",
+        paint: {
+          "circle-color": [
+            "case",
+            ["boolean", ["feature-state", "hover"], false],
+            "#FFFFFF",
+            TIME_SLOT_COLOR_EXPR,
+          ],
+          "circle-radius": [
+            "case",
+            ["boolean", ["feature-state", "hover"], false],
+            9,
+            6,
+          ],
+          "circle-stroke-color": "rgba(255,255,255,0.35)",
+          "circle-stroke-width": 1.5,
+          "circle-opacity": 0.95,
+        },
+      });
+
+      // ── events hover ─────────────────────────────────────────────────────────
+      map.on("mouseenter", "events-circle", (e) => {
+        map.getCanvas().style.cursor = "pointer";
+        const id = e.features?.[0]?.id;
+        if (id == null) return;
+        if (hoveredEventRef.current != null) {
+          map.setFeatureState(
+            { source: "events", id: hoveredEventRef.current },
+            { hover: false }
+          );
+        }
+        hoveredEventRef.current = id;
+        map.setFeatureState({ source: "events", id }, { hover: true });
+      });
+
+      map.on("mouseleave", "events-circle", () => {
+        map.getCanvas().style.cursor = "";
+        if (hoveredEventRef.current != null) {
+          map.setFeatureState(
+            { source: "events", id: hoveredEventRef.current },
+            { hover: false }
+          );
+          hoveredEventRef.current = null;
+        }
+      });
+
+      // ── events click popup ───────────────────────────────────────────────────
+      map.on("click", "events-circle", (e) => {
+        const props = e.features?.[0]?.properties;
+        if (!props) return;
+        if (popupRef.current) popupRef.current.remove();
+        const location = [props.city, props.state].filter(Boolean).join(", ");
+        const date = props.startDate
+          ? new Date(props.startDate).toLocaleString("en-US", {
+              weekday: "short", month: "short", day: "numeric",
+              hour: "numeric", minute: "2-digit", timeZoneName: "short",
+            })
+          : "";
+        const slotColors = {
+          noon: "#34D399", afternoon: "#F59E0B", evening: "#A78BFA",
+        };
+        const dotColor = slotColors[props.time_slot] ?? "#94A3B8";
+        popupRef.current = new mapboxgl.Popup({ offset: 12, closeButton: true, maxWidth: "240px" })
+          .setLngLat(e.lngLat)
+          .setHTML(`
+            <div style="font-family:'DM Sans',sans-serif;">
+              <div style="font-size:13px;font-weight:700;color:#F0F6FC;margin-bottom:6px;line-height:1.3;">
+                ${props.awayTeam} <span style="color:#64748B;">@</span> ${props.homeTeam}
+              </div>
+              <div style="font-size:11px;color:#94A3B8;margin-bottom:4px;">${props.venueName}</div>
+              <div style="font-size:11px;color:#64748B;">${location}</div>
+              ${date ? `<div style="margin-top:6px;font-size:11px;color:#64748B;">${date}</div>` : ""}
+              <div style="margin-top:8px;display:inline-flex;align-items:center;gap:5px;
+                          background:rgba(255,255,255,0.06);border-radius:4px;padding:3px 7px;">
+                <span style="width:7px;height:7px;border-radius:50%;background:${dotColor};display:inline-block;"></span>
+                <span style="font-size:10px;color:#94A3B8;text-transform:capitalize;">${props.time_slot ?? ""}</span>
+              </div>
+            </div>
+          `)
+          .addTo(map);
+      });
+
       loadedRef.current = true;
 
       // If venue data arrived before the map finished loading, apply it now.
       if (pendingRef.current) {
         map.getSource("venues").setData(pendingRef.current);
         pendingRef.current = null;
+      }
+      if (pendingEventsRef.current) {
+        map.getSource("events").setData(pendingEventsRef.current);
+        pendingEventsRef.current = null;
       }
     });
 
@@ -171,16 +294,35 @@ export default function Map({ venueGeoJSON = EMPTY_FC }) {
   }, []);
 
   // ── sync venue data whenever the prop changes ────────────────────────────────
-  // source.setData() is the idiomatic way to update GeoJSON — no layer teardown.
   useEffect(() => {
     if (!mapRef.current) return;
     if (loadedRef.current) {
       mapRef.current.getSource("venues")?.setData(venueGeoJSON);
     } else {
-      // Map hasn't fired 'load' yet; stash data for the load handler above.
       pendingRef.current = venueGeoJSON;
     }
   }, [venueGeoJSON]);
+
+  // ── sync events data whenever the prop changes ───────────────────────────────
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (loadedRef.current) {
+      mapRef.current.getSource("events")?.setData(eventsGeoJSON);
+    } else {
+      pendingEventsRef.current = eventsGeoJSON;
+    }
+  }, [eventsGeoJSON]);
+
+  // ── sync layer visibility ────────────────────────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loadedRef.current) return;
+    const vis = (on) => (on ? "visible" : "none");
+    map.setLayoutProperty("venues-glow",   "visibility", vis(layerVisibility.venues));
+    map.setLayoutProperty("venues-circle", "visibility", vis(layerVisibility.venues));
+    map.setLayoutProperty("events-glow",   "visibility", vis(layerVisibility.events));
+    map.setLayoutProperty("events-circle", "visibility", vis(layerVisibility.events));
+  }, [layerVisibility]);
 
   return <div ref={containerRef} style={{ width: "100%", height: "100%" }} />;
 }
