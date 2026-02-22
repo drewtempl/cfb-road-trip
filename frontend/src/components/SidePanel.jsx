@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { COLORS, TIME_SLOT_COLORS, ALL_TIME_SLOTS, WEEKS } from "../constants";
 import TripCard from "./TripCard";
 
@@ -37,6 +38,8 @@ export default function SidePanel({
   computing,
   filteredEvents,
 }) {
+  const eventMap = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
+
   return (
     <div style={{
       width: "380px", minWidth: "380px", height: "100%",
@@ -202,7 +205,7 @@ export default function SidePanel({
             <TripCard
               key={trip.id}
               trip={trip}
-              events={events}
+              eventMap={eventMap}
               venueMap={venueMap}
               isSelected={selectedTrip?.id === trip.id}
               onSelect={onTripSelect}

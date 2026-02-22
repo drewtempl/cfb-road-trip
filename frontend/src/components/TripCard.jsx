@@ -17,14 +17,14 @@ function bufferColor(hrs) {
 
 export default function TripCard({
   trip,
-  events,
+  eventMap,
   venueMap,
   isSelected,
   onSelect,
   onHoverEnter,
   onHoverLeave,
 }) {
-  const tripEvents = trip.event_ids.map((id) => events.find((e) => e.id === id)).filter(Boolean);
+  const tripEvents = trip.event_ids.map((id) => eventMap.get(id)).filter(Boolean);
 
   const firstCity = venueMap.get(tripEvents[0]?.venue_id)?.city ?? "";
   const lastCity  = venueMap.get(tripEvents[tripEvents.length - 1]?.venue_id)?.city ?? "";
